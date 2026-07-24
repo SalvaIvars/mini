@@ -279,7 +279,7 @@ wheels = [
 ]
 
 [[package]]
-name = "mini-agent"
+name = "mini"
 version = "0.2.0"
 source = { virtual = "." }
 dependencies = [
