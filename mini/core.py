@@ -1,3 +1,4 @@
+from ._types import Environment, Model
 from .commands import Command, CommandRegistry, SlashCommandCompleter
 from .context import ContextWindow
 from .cost_tracker import CostTracker
@@ -8,10 +9,10 @@ from .exceptions import InterruptFlow, LimitsExceeded
 class Mini:
     def __init__(
         self,
-        model,
-        env,
+        model: Model,
+        env: Environment,
         *,
-        step_limit: int = 50,
+        call_limit: int = 50,
         cost_limit: float = 0,
         input_cost_per_token: float = 0,
         output_cost_per_token: float = 0,
@@ -26,7 +27,7 @@ class Mini:
 
         self.display = Display()
         self.tracker = CostTracker(
-            step_limit=step_limit,
+            call_limit=call_limit,
             cost_limit=cost_limit,
             input_cost_per_token=input_cost_per_token,
             output_cost_per_token=output_cost_per_token,
@@ -37,7 +38,7 @@ class Mini:
             max_context_tokens=max_context_tokens,
             keep_turns=keep_turns,
         )
-        self.commands = CommandRegistry()
+        self.commands = CommandRegistry(self.display)
         self._register_commands()
 
     def _register_commands(self):
@@ -54,8 +55,20 @@ class Mini:
             self._cmd_show_interior,
         )
         self.commands.register(
+            Command("show-reasoning", "Show model reasoning", "Debug"),
+            self._cmd_show_reasoning,
+        )
+        self.commands.register(
+            Command("hide-reasoning", "Hide model reasoning", "Debug"),
+            self._cmd_hide_reasoning,
+        )
+        self.commands.register(
             Command("help", "Show all available commands", "Help"),
             self._cmd_help,
+        )
+        self.commands.register(
+            Command("summarization", "Force context summarization", "Session"),
+            self._cmd_summarization,
         )
         self.commands.register(
             Command("clear", "Clear conversation memory", "Session"),
@@ -165,9 +178,53 @@ class Mini:
     def _cmd_help(self, raw: str):
         self.display.print_help(self.commands.commands)
 
+    def _cmd_show_reasoning(self, raw: str):
+        self.display.show_reasoning = True
+        self.display.print_reasoning_toggle(True)
+
+    def _cmd_hide_reasoning(self, raw: str):
+        self.display.show_reasoning = False
+        self.display.print_reasoning_toggle(False)
+
     def _cmd_clear(self, raw: str):
         self.messages.clear()
         self.n_tool_calls = 0
         self.tracker.reset()
         self.context.reset()
         self.display.print_clear_confirmation()
+
+    def _cmd_summarization(self, raw: str):
+        info = self.context.summarize(self.messages)
+
+        if info is None:
+            self.display.print_summarization_skip()
+            return
+
+        self.display.print_summarization_input(info, self.context.max_context_tokens)
+
+        message, _actions, _usage = self.display.stream_response(
+            info["stream"],
+            force_hide_reasoning=True,
+        )
+        summary = message.get("content", "") if message else ""
+
+        if summary:
+            summary_msg = {"role": "system", "content": f"## Session History\n{summary}"}
+            self.messages = info["system"] + [summary_msg] + info["recent"]
+
+            summary_tok = self.context.count_tokens([summary_msg])
+            final_tokens = self.context.count_tokens(self.messages)
+            self.context.log_event({
+                "type": "summarize",
+                "total_tokens": final_tokens,
+                "old_turns": info["old_turns"],
+                "original_tokens": info["original_tokens"],
+                "summary_tokens": summary_tok,
+                "summary_preview": summary[:80],
+                "input_lines": info["input_lines"],
+                "summary_full": summary,
+            })
+
+            self.display.print_summarization_result(final_tokens, self.context.max_context_tokens)
+        else:
+            self.display.print_summarization_skip()

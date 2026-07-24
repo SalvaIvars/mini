@@ -21,6 +21,7 @@ class Display:
     def __init__(self, console: Console | None = None):
         self.console = console or Console()
         self.session = PromptSession(style=_MENU_STYLE)
+        self.show_reasoning = True
 
     def prompt(self, completer):
         return self.session.prompt(
@@ -42,7 +43,7 @@ class Display:
     def print_error(self, message: str):
         self.console.print(Text(message, style="bold red"))
 
-    def stream_response(self, stream, *, on_usage=None):
+    def stream_response(self, stream, *, on_usage=None, force_hide_reasoning=False):
         message = None
         actions = []
         usage = None
@@ -50,7 +51,8 @@ class Display:
 
         for event in stream:
             if event["type"] == "reasoning":
-                self.console.print(event["delta"], style="dim", end="")
+                if self.show_reasoning and not force_hide_reasoning:
+                    self.console.print(event["delta"], style="dim", end="")
             elif event["type"] == "content":
                 if not reasoning_ended:
                     reasoning_ended = True
@@ -117,6 +119,28 @@ class Display:
     def print_clear_confirmation(self):
         self.console.print("Conversation cleared.", style="green")
 
+    def print_summarization_result(self, final_tokens: int, max_tokens: int):
+        pct = final_tokens / max_tokens * 100
+        self.console.print(f"Context: {final_tokens:,} / {max_tokens:,} tok ({pct:.1f}%)", style="green")
+
+    def print_summarization_skip(self):
+        self.console.print("Nothing to summarize yet.", style="dim")
+
+    def print_summarization_input(self, info: dict, max_context_tokens: int):
+        old_turns = info.get("old_turns", 0)
+        original_tokens = info.get("original_tokens", 0)
+        input_lines = info.get("input_lines", [])
+        total_tokens = info.get("total_tokens", 0)
+
+        pct = total_tokens / max_context_tokens * 100
+        self.console.print(f"Context: {total_tokens:,} / {max_context_tokens:,} tok ({pct:.1f}%)", style="green")
+        self.console.print(f"Summarizing {old_turns} turn(s) ({original_tokens:,} tok):", style="bold")
+        for line in input_lines:
+            self.console.print(f"  {line}", style="dim")
+        self.console.print()
+        self.console.print("Generating summary...", style="bold green")
+        self.console.print()
+
     def print_interior_status(self, context, messages: list[dict], total_messages: int):
         events = context.get_events()
         max_ctx = context.max_context_tokens
@@ -132,6 +156,8 @@ class Display:
 
             if ev["type"] == "skip":
                 lines.append(Text(f"  [{i}] skip — {t:,} / {max_ctx:,} tok ({pct:.1f}%) — no compression"))
+            elif ev["type"] == "skip_summarize":
+                lines.append(Text(f"  [{i}] skip — {t:,} / {max_ctx:,} tok ({pct:.1f}%) — nothing to summarize"))
             elif ev["type"] == "clear":
                 lines.append(Text(f"  [{i}] clear — {t:,} tok — cleared {ev['count']} tool result(s): {ev['original_lines']}→{ev['new_lines']} lines"))
             elif ev["type"] == "summarize":
@@ -157,6 +183,8 @@ class Display:
 
         if event["type"] == "skip":
             line += " — no compression needed —"
+        elif event["type"] == "skip_summarize":
+            line += " — nothing to summarize —"
         elif event["type"] == "clear":
             line += f" — cleared {event['count']} tool result(s): {event['original_lines']}→{event['new_lines']} lines —"
         elif event["type"] == "summarize":
@@ -175,6 +203,12 @@ class Display:
             self.console.print("Interior mode: ON", style="bold yellow")
         else:
             self.console.print("Interior mode: OFF", style="dim")
+
+    def print_reasoning_toggle(self, on: bool):
+        if on:
+            self.console.print("Reasoning: ON", style="bold yellow")
+        else:
+            self.console.print("Reasoning: OFF", style="dim")
 
     def print_unknown_subcommand(self, arg: str):
         self.console.print(Text(f"Unknown: {arg}. Use: /show-interior [on|off]", style="yellow"))

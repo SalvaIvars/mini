@@ -42,12 +42,12 @@ class TestCostTracker:
         assert tracker.cost == pytest.approx(0.045)
 
     def test_check_limits_passes_when_under(self):
-        tracker = CostTracker(step_limit=10)
+        tracker = CostTracker(call_limit=10)
         tracker.n_calls = 5
         tracker.check_limits()  # should not raise
 
-    def test_check_limits_raises_on_step_limit(self):
-        tracker = CostTracker(step_limit=5)
+    def test_check_limits_raises_on_call_limit(self):
+        tracker = CostTracker(call_limit=5)
         tracker.n_calls = 5
         with pytest.raises(LimitsExceeded) as exc:
             tracker.check_limits()

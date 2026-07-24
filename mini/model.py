@@ -1,5 +1,6 @@
 import json
 import time
+from typing import Iterator
 
 from openai import OpenAI
 
@@ -39,14 +40,15 @@ class OpenAIModel:
         )
         actions = self._parse_actions(response)
         message = response.choices[0].message.model_dump()
+        usage = response.usage.model_dump() if response.usage else None
         message["extra"] = {
             "actions": actions,
-            "response": response.model_dump(),
             "timestamp": time.time(),
+            "usage": usage,
         }
         return message
 
-    def stream(self, messages):
+    def stream(self, messages: list[dict], **kwargs) -> Iterator[dict]:
         cleaned = [{k: v for k, v in m.items() if k != "extra"} for m in messages]
         response = self.client.chat.completions.create(
             model=self.model_name,

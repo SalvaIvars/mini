@@ -1,8 +1,11 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from prompt_toolkit.completion import Completer, Completion
+
+if TYPE_CHECKING:
+    from .display import Display
 
 
 @dataclass
@@ -18,9 +21,10 @@ CommandHandler = Callable[[str], None]
 class CommandRegistry:
     """Single source of truth for slash commands and their handlers."""
 
-    def __init__(self):
+    def __init__(self, display: Display | None = None):
         self._commands: list[Command] = []
         self._handlers: dict[str, CommandHandler] = {}
+        self._display = display
 
     def register(self, command: Command, handler: CommandHandler):
         self._commands.append(command)
@@ -37,6 +41,8 @@ class CommandRegistry:
         handler = self._handlers.get(cmd_name)
         if handler:
             handler(raw)
+        elif self._display:
+            self._display.unknown_command(raw)
         else:
             print(f"  Unknown command: {raw}. Type /help for available commands.")
         return True
@@ -101,7 +107,10 @@ COMMANDS: list[Command] = [
     Command("cost", "Show token usage and cost for this session", "Info"),
     Command("calls", "Show tool call count for this session", "Info"),
     Command("show-interior", "Toggle verbose interior mode", "Debug"),
+    Command("show-reasoning", "Show model reasoning", "Debug"),
+    Command("hide-reasoning", "Hide model reasoning", "Debug"),
     Command("help", "Show all available commands", "Help"),
+    Command("summarization", "Force context summarization", "Session"),
     Command("clear", "Clear conversation memory", "Session"),
     Command("exit", "Quit the application", "Session"),
 ]

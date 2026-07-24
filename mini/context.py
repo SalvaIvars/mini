@@ -1,4 +1,5 @@
 import json
+from typing import Iterator
 
 import tiktoken
 
@@ -79,7 +80,7 @@ class ContextWindow:
         out["content"] = "\n".join(kept)
         return out
 
-    def _summarize_turns(self, turns: list[list[dict]]) -> str:
+    def _summarize_turns(self, turns: list[list[dict]]) -> tuple[list[str], Iterator]:
         lines = []
         for turn in turns:
             user = next((m["content"] for m in turn if m["role"] == "user"), "")
@@ -100,7 +101,13 @@ class ContextWindow:
                         "<returncode>" in (m.get("content") or "")
                         and "0" not in m["content"].split("<returncode>")[1].split("</returncode>")[0].strip()
                     )
-                    lines.append(f"  \u21b7 ({'error' if is_err else 'ok'})")
+                    content = m.get("content", "")
+                    if "<output>" in content and "</output>" in content:
+                        output = content.split("<output>")[1].split("</output>")[0]
+                        preview = output.strip().replace("\n", " ")[:100]
+                        lines.append(f"  \u21b7 ({'error' if is_err else 'ok'}) {preview}...")
+                    else:
+                        lines.append(f"  \u21b7 ({'error' if is_err else 'ok'})")
         prompt = (
             "Compress this conversation into a concise memory summary.\n"
             "Keep: user requests, commands executed, what was found, decisions made, files modified.\n"
@@ -109,8 +116,8 @@ class ContextWindow:
             f"{chr(10).join(lines)}\n\n"
             "Summary:"
         )
-        result = self.model.query([{"role": "user", "content": prompt}])
-        return result.get("content", "")
+        stream = self.model.stream([{"role": "user", "content": prompt}])
+        return lines, stream
 
     def log_event(self, event: dict):
         self._compression_events.append(event)
@@ -172,7 +179,7 @@ class ContextWindow:
             return candidate
 
         orig_tok_before = self.count_tokens([m for turn in old for m in turn])
-        summary = self._summarize_turns(old)
+        _input_lines, summary = self._summarize_turns(old)
         if summary:
             summary_msg = {"role": "system", "content": f"## Session History\n{summary}"}
             summary_tok = self.count_tokens([summary_msg])
@@ -207,3 +214,37 @@ class ContextWindow:
                 candidate = system + recent_cleared
 
         return candidate
+
+    def summarize(self, messages: list[dict]) -> dict | None:
+        self.strip_reasoning(messages)
+
+        if messages and messages[0]["role"] == "system":
+            system = [messages[0]]
+            rest = messages[1:]
+        else:
+            system = []
+            rest = messages
+
+        turns = self.group_into_turns(rest)
+
+        if len(turns) <= 1:
+            self.log_event({"type": "skip_summarize", "total_tokens": self.count_tokens(messages)})
+            return None
+
+        kept = turns[-1:]
+        old = turns[:-1]
+
+        old_turns_cleared = [[self.clear_tool_result(m) for m in turn] for turn in old]
+        recent = [self.clear_tool_result(m) for turn in kept for m in turn]
+
+        input_lines, stream = self._summarize_turns(old_turns_cleared)
+
+        return {
+            "input_lines": input_lines,
+            "stream": stream,
+            "old_turns": len(old),
+            "original_tokens": self.count_tokens([m for turn in old for m in turn]),
+            "total_tokens": self.count_tokens(messages),
+            "recent": recent,
+            "system": system,
+        }

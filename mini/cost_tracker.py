@@ -7,7 +7,7 @@ from .exceptions import LimitsExceeded
 class CostTracker:
     """Tracks token usage, cost, and enforces spend/call limits."""
 
-    step_limit: int = 50
+    call_limit: int = 50
     cost_limit: float = 0.0
     input_cost_per_token: float = 0.0
     output_cost_per_token: float = 0.0
@@ -31,7 +31,7 @@ class CostTracker:
         self.n_calls += 1
 
     def check_limits(self):
-        if 0 < self.step_limit <= self.n_calls:
+        if 0 < self.call_limit <= self.n_calls:
             raise LimitsExceeded({
                 "role": "exit",
                 "content": "LimitsExceeded",

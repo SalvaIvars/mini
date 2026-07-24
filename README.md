@@ -7,6 +7,8 @@ A lightweight, modular AI coding agent that runs in the terminal. Connects to an
 - **Streaming REPL** with syntax-highlighted tool output, reasoning visibility, and tab-completion for slash commands
 - **Modular architecture** based on protocol-driven dependency injection -- swap models or execution environments without touching the core loop
 - **Transparent context management** -- interior mode shows token counts, compression decisions, and event history turn by turn
+- **Reasoning visibility** -- toggle model reasoning on/off with `/show-reasoning` and `/hide-reasoning`
+- **On-demand summarization** -- manually compress context with `/summarization`
 - **Three-level context compression** (clear, summarize, aggressive) keeps long sessions under budget without losing critical information
 - **Cost tracking** with per-token pricing and hard step/cost limits
 - **Single binary entry point** via `mini` CLI command
@@ -67,6 +69,9 @@ Pricing is configured via environment variables: `INPUT_PRICE`, `OUTPUT_PRICE`, 
 | `/cost` | Show token usage and cost for this session |
 | `/calls` | Show tool call count |
 | `/show-interior [on\|off]` | Toggle verbose interior mode |
+| `/show-reasoning` | Show model reasoning |
+| `/hide-reasoning` | Hide model reasoning |
+| `/summarization` | Force context summarization |
 | `/help` | List all commands |
 | `/clear` | Clear conversation memory |
 | `/exit` | Quit |

@@ -272,25 +272,31 @@ class TestPrepareMessages:
 
 
 class TestSummarizeTurns:
-    def test_calls_model_query(self):
+    def test_calls_model_stream(self):
         model = MagicMock()
-        model.query.return_value = {"content": "- Fixed the bug"}
+        model.stream.return_value = iter([
+            {"type": "content", "delta": "- Fixed the bug"},
+            {"type": "done", "message": {"role": "assistant", "content": "- Fixed the bug"}, "actions": [], "usage": None},
+        ])
         context = ContextWindow(model, max_context_tokens=100, keep_turns=1)
         turns = [
             [
                 {"role": "user", "content": "find the bug"},
                 {"role": "assistant", "content": "", "tool_calls": [make_tool_call("c1", "grep error")]},
-                make_tool_result("error found"),
+                make_tool_result("<returncode>0</returncode>\n<output>\nerror found\n</output>"),
                 {"role": "assistant", "content": "Found it"},
             ]
         ]
-        result = context._summarize_turns(turns)
-        assert result == "- Fixed the bug"
-        assert model.query.called
+        input_lines, stream = context._summarize_turns(turns)
+        assert input_lines == ['User: find the bug', '  → bash: grep error', '  ↷ (ok) error found...', '  → Found it']
+        assert model.stream.called
 
     def test_with_tool_calls_in_summary(self):
         model = MagicMock()
-        model.query.return_value = {"content": "- Ran grep"}
+        model.stream.return_value = iter([
+            {"type": "content", "delta": "- Ran grep"},
+            {"type": "done", "message": {"role": "assistant", "content": "- Ran grep"}, "actions": [], "usage": None},
+        ])
         context = ContextWindow(model, max_context_tokens=100, keep_turns=1)
         turns = [
             [
@@ -304,7 +310,185 @@ class TestSummarizeTurns:
                 {"role": "assistant", "content": "Found TODOs"},
             ]
         ]
-        result = context._summarize_turns(turns)
-        assert result
-        prompt_sent = model.query.call_args[0][0][0]["content"]
+        input_lines, stream = context._summarize_turns(turns)
+        assert input_lines
+        prompt_sent = model.stream.call_args[0][0][0]["content"]
         assert "grep" in prompt_sent
+
+    def test_tool_result_with_large_output(self):
+        model = MagicMock()
+        model.stream.return_value = iter([
+            {"type": "content", "delta": "- summary"},
+            {"type": "done", "message": {"role": "assistant", "content": "- summary"}, "actions": [], "usage": None},
+        ])
+        context = ContextWindow(model, max_context_tokens=100, keep_turns=1)
+        large_output = "A" * 150
+        turns = [
+            [
+                {"role": "user", "content": "test"},
+                {"role": "assistant", "content": "", "tool_calls": [make_tool_call("c1", "cmd")]},
+                make_tool_result(f"<returncode>0</returncode>\n<output>\n{large_output}\n</output>"),
+            ]
+        ]
+        input_lines, stream = context._summarize_turns(turns)
+        assert len(input_lines) == 3
+        assert input_lines[2].startswith('  ↷ (ok) ')
+        assert input_lines[2].endswith('...')
+        preview_part = input_lines[2][len('  ↷ (ok) '):-len('...')]
+        assert len(preview_part) == 100
+
+    def test_tool_result_with_newlines(self):
+        model = MagicMock()
+        model.stream.return_value = iter([
+            {"type": "content", "delta": "- summary"},
+            {"type": "done", "message": {"role": "assistant", "content": "- summary"}, "actions": [], "usage": None},
+        ])
+        context = ContextWindow(model, max_context_tokens=100, keep_turns=1)
+        output_with_newlines = "line1\nline2\nline3"
+        turns = [
+            [
+                {"role": "user", "content": "test"},
+                {"role": "assistant", "content": "", "tool_calls": [make_tool_call("c1", "cmd")]},
+                make_tool_result(f"<returncode>0</returncode>\n<output>\n{output_with_newlines}\n</output>"),
+            ]
+        ]
+        input_lines, stream = context._summarize_turns(turns)
+        assert '\n' not in input_lines[2]
+        assert 'line1 line2 line3' in input_lines[2]
+
+    def test_tool_result_without_output_tags(self):
+        model = MagicMock()
+        model.stream.return_value = iter([
+            {"type": "content", "delta": "- summary"},
+            {"type": "done", "message": {"role": "assistant", "content": "- summary"}, "actions": [], "usage": None},
+        ])
+        context = ContextWindow(model, max_context_tokens=100, keep_turns=1)
+        turns = [
+            [
+                {"role": "user", "content": "test"},
+                {"role": "assistant", "content": "", "tool_calls": [make_tool_call("c1", "cmd")]},
+                {"role": "tool", "content": "plain text without tags"},
+            ]
+        ]
+        input_lines, stream = context._summarize_turns(turns)
+        assert input_lines[2] == '  ↷ (ok)'
+
+
+# ============================================================
+# summarize
+# ============================================================
+
+
+class TestSummarize:
+    def test_summarize_clears_recent_tool_outputs(self):
+        model = MagicMock()
+        model.stream.return_value = iter([
+            {"type": "content", "delta": "- summary"},
+            {"type": "done", "message": {"role": "assistant", "content": "- summary"}, "actions": [], "usage": None},
+        ])
+        context = ContextWindow(model, max_context_tokens=100, keep_turns=1)
+        
+        large_output = "line\n" * 100
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "old request"},
+            {"role": "assistant", "content": "", "tool_calls": [make_tool_call("c1", "old_cmd")]},
+            make_tool_result("<returncode>0</returncode>\n<output>\nold output\n</output>"),
+            {"role": "user", "content": "recent request"},
+            {"role": "assistant", "content": "", "tool_calls": [make_tool_call("c2", "recent_cmd")]},
+            make_tool_result(f"<returncode>0</returncode>\n<output>\n{large_output}\n</output>"),
+        ]
+        
+        info = context.summarize(messages)
+        assert info is not None
+        
+        recent = info["recent"]
+        tool_result = next(m for m in recent if m.get("role") == "tool")
+        
+        lines = tool_result["content"].split("\n")
+        assert len(lines) <= 15
+
+    def test_summarize_reduces_context_significantly(self):
+        model = MagicMock()
+        model.stream.return_value = iter([
+            {"type": "content", "delta": "- summary"},
+            {"type": "done", "message": {"role": "assistant", "content": "- summary"}, "actions": [], "usage": None},
+        ])
+        context = ContextWindow(model, max_context_tokens=100000, keep_turns=1)
+        
+        large_output = "line\n" * 10000
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "old request 1"},
+            {"role": "assistant", "content": "old response 1"},
+            {"role": "user", "content": "old request 2"},
+            {"role": "assistant", "content": "", "tool_calls": [make_tool_call("c1", "heavy_cmd")]},
+            make_tool_result(f"<returncode>0</returncode>\n<output>\n{large_output}\n</output>"),
+        ]
+        
+        tokens_before = context.count_tokens(messages)
+        info = context.summarize(messages)
+        assert info is not None
+        
+        messages_after = info["system"] + [{"role": "system", "content": "summary"}] + info["recent"]
+        tokens_after = context.count_tokens(messages_after)
+        
+        reduction = (tokens_before - tokens_after) / tokens_before
+        assert reduction >= 0.5
+
+    def test_summarize_preserves_small_tool_outputs(self):
+        model = MagicMock()
+        model.stream.return_value = iter([
+            {"type": "content", "delta": "- summary"},
+            {"type": "done", "message": {"role": "assistant", "content": "- summary"}, "actions": [], "usage": None},
+        ])
+        context = ContextWindow(model, max_context_tokens=100, keep_turns=1)
+        
+        small_output = "small output"
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "old request"},
+            {"role": "assistant", "content": "old response"},
+            {"role": "user", "content": "recent request"},
+            {"role": "assistant", "content": "", "tool_calls": [make_tool_call("c1", "cmd")]},
+            make_tool_result(f"<returncode>0</returncode>\n<output>\n{small_output}\n</output>"),
+        ]
+        
+        info = context.summarize(messages)
+        assert info is not None
+        
+        recent = info["recent"]
+        tool_result = next(m for m in recent if m.get("role") == "tool")
+        
+        assert small_output in tool_result["content"]
+
+    def test_summarize_with_multiple_recent_turns(self):
+        model = MagicMock()
+        model.stream.return_value = iter([
+            {"type": "content", "delta": "- summary"},
+            {"type": "done", "message": {"role": "assistant", "content": "- summary"}, "actions": [], "usage": None},
+        ])
+        context = ContextWindow(model, max_context_tokens=100, keep_turns=2)
+        
+        large_output = "line\n" * 100
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "old request"},
+            {"role": "assistant", "content": "old response"},
+            {"role": "user", "content": "recent request 1"},
+            {"role": "assistant", "content": "", "tool_calls": [make_tool_call("c1", "cmd1")]},
+            make_tool_result(f"<returncode>0</returncode>\n<output>\n{large_output}\n</output>"),
+            {"role": "user", "content": "recent request 2"},
+            {"role": "assistant", "content": "", "tool_calls": [make_tool_call("c2", "cmd2")]},
+            make_tool_result(f"<returncode>0</returncode>\n<output>\n{large_output}\n</output>"),
+        ]
+        
+        info = context.summarize(messages)
+        assert info is not None
+        
+        recent = info["recent"]
+        tool_results = [m for m in recent if m.get("role") == "tool"]
+        
+        for tool_result in tool_results:
+            lines = tool_result["content"].split("\n")
+            assert len(lines) <= 15
