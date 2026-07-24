@@ -1,7 +1,7 @@
 import json
 from unittest.mock import MagicMock
 
-from mini_agent.context import ContextWindow
+from mini.context import ContextWindow
 
 
 def make_tool_call(id_: str, command: str) -> dict:

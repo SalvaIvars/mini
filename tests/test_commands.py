@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mini_agent.commands import Command, CommandRegistry, SlashCommandCompleter
+from mini.commands import Command, CommandRegistry, SlashCommandCompleter
 
 
 class TestCommandRegistry:

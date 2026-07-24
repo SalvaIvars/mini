@@ -102,7 +102,7 @@ class ContextWindow:
                     )
                     lines.append(f"  \u21b7 ({'error' if is_err else 'ok'})")
         prompt = (
-            "Compress this agent conversation into a concise memory summary.\n"
+            "Compress this conversation into a concise memory summary.\n"
             "Keep: user requests, commands executed, what was found, decisions made, files modified.\n"
             "Discard: exact command output, stack traces, intermediate back-and-forth.\n"
             "Output 3-8 bullet points. Use technical language.\n\n"

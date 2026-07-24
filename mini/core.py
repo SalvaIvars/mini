@@ -2,10 +2,10 @@ from .commands import Command, CommandRegistry, SlashCommandCompleter
 from .context import ContextWindow
 from .cost_tracker import CostTracker
 from .display import Display
-from .exceptions import InterruptAgentFlow, LimitsExceeded
+from .exceptions import InterruptFlow, LimitsExceeded
 
 
-class DefaultAgent:
+class Mini:
     def __init__(
         self,
         model,
@@ -102,7 +102,7 @@ class DefaultAgent:
             self.messages.append({"role": "user", "content": user_input})
             try:
                 self._run_turn()
-            except InterruptAgentFlow as e:
+            except InterruptFlow as e:
                 if isinstance(e, LimitsExceeded):
                     self.display.print_limits_exceeded(e.messages)
                 break

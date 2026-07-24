@@ -3,7 +3,7 @@ import os
 import typer
 from dotenv import load_dotenv
 
-from .agent import DefaultAgent
+from .core import Mini
 from .environment import LocalEnvironment
 from .model import OpenAIModel
 
@@ -23,7 +23,7 @@ def main(
     if api_key:
         os.environ.setdefault("OPENAI_API_KEY", api_key)
 
-    agent = DefaultAgent(
+    mini = Mini(
         OpenAIModel(model_name=model, api_key=api_key, api_base=api_base),
         LocalEnvironment(),
         input_cost_per_token=float(os.getenv("INPUT_PRICE", "0")),
@@ -32,7 +32,7 @@ def main(
         max_context_tokens=max_context,
         keep_turns=keep_turns,
     )
-    agent.start()
+    mini.start()
 
 
 if __name__ == "__main__":

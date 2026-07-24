@@ -1,7 +1,7 @@
 import pytest
 
-from mini_agent.cost_tracker import CostTracker
-from mini_agent.exceptions import LimitsExceeded
+from mini.cost_tracker import CostTracker
+from mini.exceptions import LimitsExceeded
 
 
 class TestCostTracker:
