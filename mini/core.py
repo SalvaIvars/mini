@@ -1,3 +1,7 @@
+import time
+
+from openai import APIError, RateLimitError
+
 from ._types import Environment, Model
 from .commands import Command, CommandRegistry, SlashCommandCompleter
 from .context import ContextWindow
@@ -11,6 +15,7 @@ class Mini:
         self,
         model: Model,
         env: Environment,
+        display: Display,
         *,
         call_limit: int = 50,
         cost_limit: float = 0,
@@ -25,7 +30,7 @@ class Mini:
         self.messages: list[dict] = []
         self.n_tool_calls = 0
 
-        self.display = Display()
+        self.display = display
         self.tracker = CostTracker(
             call_limit=call_limit,
             cost_limit=cost_limit,
@@ -129,12 +134,25 @@ class Mini:
             if self.context.interior_mode:
                 last_event = self.context.last_event()
                 if last_event:
-                    self.display.print_interior_event(last_event, self.context.max_context_tokens)
+                    self.display.print_interior_event(
+                        last_event, self.context.max_context_tokens
+                    )
 
-            message, actions, _usage = self.display.stream_response(
-                self.model.stream(messages),
-                on_usage=self.tracker.update,
-            )
+            max_retries = 3
+            message, actions = None, []
+            for attempt in range(max_retries):
+                try:
+                    message, actions, _usage = self.display.stream_response(
+                        self.model.stream(messages),
+                        on_usage=self.tracker.update,
+                    )
+                    break
+                except (RateLimitError, APIError) as e:
+                    if attempt == max_retries - 1:
+                        raise
+                    wait_time = 2**attempt
+                    self.display.print_retry_warning(attempt + 1, wait_time, str(e))
+                    time.sleep(wait_time)
 
             if message is None:
                 continue
@@ -162,13 +180,17 @@ class Mini:
             self.context.set_interior_mode(not self.context.interior_mode)
             self.display.print_interior_toggle(self.context.interior_mode)
             if self.context.interior_mode:
-                self.display.print_interior_status(self.context, self.messages, len(self.messages))
+                self.display.print_interior_status(
+                    self.context, self.messages, len(self.messages)
+                )
         elif len(parts) == 2:
             arg = parts[1]
             if arg == "on":
                 self.context.set_interior_mode(True)
                 self.display.print_interior_toggle(True)
-                self.display.print_interior_status(self.context, self.messages, len(self.messages))
+                self.display.print_interior_status(
+                    self.context, self.messages, len(self.messages)
+                )
             elif arg == "off":
                 self.context.set_interior_mode(False)
                 self.display.print_interior_toggle(False)
@@ -209,22 +231,29 @@ class Mini:
         summary = message.get("content", "") if message else ""
 
         if summary:
-            summary_msg = {"role": "system", "content": f"## Session History\n{summary}"}
+            summary_msg = {
+                "role": "system",
+                "content": f"## Session History\n{summary}",
+            }
             self.messages = info["system"] + [summary_msg] + info["recent"]
 
             summary_tok = self.context.count_tokens([summary_msg])
             final_tokens = self.context.count_tokens(self.messages)
-            self.context.log_event({
-                "type": "summarize",
-                "total_tokens": final_tokens,
-                "old_turns": info["old_turns"],
-                "original_tokens": info["original_tokens"],
-                "summary_tokens": summary_tok,
-                "summary_preview": summary[:80],
-                "input_lines": info["input_lines"],
-                "summary_full": summary,
-            })
+            self.context.log_event(
+                {
+                    "type": "summarize",
+                    "total_tokens": final_tokens,
+                    "old_turns": info["old_turns"],
+                    "original_tokens": info["original_tokens"],
+                    "summary_tokens": summary_tok,
+                    "summary_preview": summary[:80],
+                    "input_lines": info["input_lines"],
+                    "summary_full": summary,
+                }
+            )
 
-            self.display.print_summarization_result(final_tokens, self.context.max_context_tokens)
+            self.display.print_summarization_result(
+                final_tokens, self.context.max_context_tokens
+            )
         else:
             self.display.print_summarization_skip()

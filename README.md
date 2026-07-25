@@ -10,6 +10,8 @@ A lightweight, modular AI coding agent that runs in the terminal. Connects to an
 - **Reasoning visibility** -- toggle model reasoning on/off with `/show-reasoning` and `/hide-reasoning`
 - **On-demand summarization** -- manually compress context with `/summarization`
 - **Three-level context compression** (clear, summarize, aggressive) keeps long sessions under budget without losing critical information
+- **Automatic retry** with exponential backoff for transient API errors (429, 500, 503)
+- **Extensible tool system** via ToolRegistry -- add new tools without modifying the core loop
 - **Cost tracking** with per-token pricing and hard step/cost limits
 - **Single binary entry point** via `mini` CLI command
 
@@ -25,10 +27,19 @@ cost_tracker.py  -- CostTracker: token/cost accounting, limit enforcement
 display.py       -- Display: all terminal I/O (Rich + prompt-toolkit)
 commands.py      -- Command / CommandRegistry / SlashCommandCompleter
 exceptions.py    -- InterruptFlow / LimitsExceeded / FormatError
-_types.py        -- Model and Environment protocols for DI and testability
+_types.py        -- Model, Environment, Summarizer, Tool protocols and ToolRegistry for extensible tool system
 ```
 
-The `Model` and `Environment` protocols in `_types.py` allow swapping implementations. The `Mini` class receives any object conforming to these protocols.
+The `Model`, `Environment`, `Summarizer`, and `Tool` protocols in `_types.py` allow swapping implementations. The `ToolRegistry` enables adding new tools without modifying the core loop. The `Mini` class receives any object conforming to these protocols.
+
+## Extensible tools
+
+The tool system is extensible via `ToolRegistry`. To add a new tool:
+1. Create a class implementing the `Tool` protocol (with `name`, `description`, `parameters`)
+2. Register it in `cli.py` with `tool_registry.register(YourTool())`
+3. Handle execution in `LocalEnvironment.execute()`
+
+The agent will automatically expose the tool to the LLM.
 
 ## Installation
 
@@ -85,6 +96,10 @@ The context window compresses messages when token count exceeds 75% of the limit
 3. **Aggressive** -- drops the summary and, if needed, aggressively truncates recent tool outputs
 
 All compression events are logged and visible via interior mode.
+
+## Retry logic
+
+The agent automatically retries API calls on transient errors (429, 500, 503) with exponential backoff (3 attempts max: 1s, 2s, 4s). Retries are visible in the terminal output.
 
 ## Interior mode
 

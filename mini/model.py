@@ -4,25 +4,32 @@ from typing import Iterator
 
 from openai import OpenAI
 
+from ._types import ToolRegistry
 from .exceptions import FormatError
 
-BASH_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "bash",
-        "description": "Execute a bash command",
-        "parameters": {
-            "type": "object",
-            "properties": {"command": {"type": "string", "description": "The bash command to execute"}},
-            "required": ["command"],
+
+class BashTool:
+    name = "bash"
+    description = "Execute a bash command"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "description": "The bash command to execute"}
         },
-    },
-}
+        "required": ["command"],
+    }
 
 
 class OpenAIModel:
-    def __init__(self, model_name: str, api_key: str = "", api_base: str = ""):
+    def __init__(
+        self,
+        model_name: str,
+        tool_registry: ToolRegistry,
+        api_key: str = "",
+        api_base: str = "",
+    ):
         self.model_name = model_name
+        self.tool_registry = tool_registry
         kwargs = {}
         if api_key:
             kwargs["api_key"] = api_key
@@ -35,7 +42,7 @@ class OpenAIModel:
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=cleaned,
-            tools=[BASH_TOOL],
+            tools=self.tool_registry.get_schemas(),
             **kwargs,
         )
         actions = self._parse_actions(response)
@@ -53,7 +60,7 @@ class OpenAIModel:
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=cleaned,
-            tools=[BASH_TOOL],
+            tools=self.tool_registry.get_schemas(),
             stream=True,
             stream_options={"include_usage": True},
             extra_body={"thinking": {"type": "enabled"}},
@@ -107,13 +114,29 @@ class OpenAIModel:
                     "function": {"name": data["name"], "arguments": data["arguments"]},
                 }
                 tcs.append(tc)
-                if data["name"] == "bash":
+                tool = self.tool_registry.get(data["name"])
+                if tool:
                     args = json.loads(data["arguments"])
-                    actions.append({"command": args["command"], "tool_call_id": data["id"]})
+                    actions.append(
+                        {
+                            "tool_name": tool.name,
+                            "arguments": args,
+                            "tool_call_id": data["id"],
+                        }
+                    )
                 else:
-                    raise FormatError({"role": "user", "content": f"Unknown tool '{data['name']}'. Only 'bash' is allowed."})
+                    raise FormatError(
+                        {
+                            "role": "user",
+                            "content": f"Unknown tool '{data['name']}'.",
+                        }
+                    )
             message["tool_calls"] = tcs
-        message["extra"] = {"actions": actions, "timestamp": time.time(), "usage": usage}
+        message["extra"] = {
+            "actions": actions,
+            "timestamp": time.time(),
+            "usage": usage,
+        }
         yield {"type": "done", "message": message, "actions": actions, "usage": usage}
 
     def _parse_actions(self, response) -> list[dict]:
@@ -122,20 +145,30 @@ class OpenAIModel:
             return []
         actions = []
         for tc in choice.message.tool_calls:
-            if tc.function.name != "bash":
-                raise FormatError({"role": "user", "content": f"Unknown tool '{tc.function.name}'. Only 'bash' is allowed."})
+            tool = self.tool_registry.get(tc.function.name)
+            if not tool:
+                raise FormatError(
+                    {
+                        "role": "user",
+                        "content": f"Unknown tool '{tc.function.name}'.",
+                    }
+                )
             args = json.loads(tc.function.arguments)
-            if "command" not in args:
-                raise FormatError({"role": "user", "content": "Missing 'command' argument in bash tool call."})
-            actions.append({"command": args["command"], "tool_call_id": tc.id})
+            actions.append(
+                {"tool_name": tool.name, "arguments": args, "tool_call_id": tc.id}
+            )
         return actions
 
     def format_message(self, **kwargs) -> dict:
         return kwargs
 
-    def format_observation_messages(self, message: dict, outputs: list[dict], template_vars: dict | None = None) -> list[dict]:
+    def format_observation_messages(
+        self, message: dict, outputs: list[dict], template_vars: dict | None = None
+    ) -> list[dict]:
         actions = message.get("extra", {}).get("actions", [])
-        padded = outputs + [{"output": "", "returncode": -1}] * (len(actions) - len(outputs))
+        padded = outputs + [{"output": "", "returncode": -1}] * (
+            len(actions) - len(outputs)
+        )
         results = []
         for action, output in zip(actions, padded):
             msg = {

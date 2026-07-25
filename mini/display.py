@@ -7,12 +7,14 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich import box
 
-_MENU_STYLE = Style.from_dict({
-    "completion-menu": "bg:#1e1e1e #d4d4d4",
-    "completion-menu.completion": "bg:#252526 #d4d4d4",
-    "completion-menu.completion.current": "bg:#094771 #ffffff",
-    "completion-menu.meta": "bg:#1e1e1e #808080",
-})
+_MENU_STYLE = Style.from_dict(
+    {
+        "completion-menu": "bg:#1e1e1e #d4d4d4",
+        "completion-menu.completion": "bg:#252526 #d4d4d4",
+        "completion-menu.completion.current": "bg:#094771 #ffffff",
+        "completion-menu.meta": "bg:#1e1e1e #808080",
+    }
+)
 
 
 class Display:
@@ -38,7 +40,10 @@ class Display:
         self.console.print("Goodbye.", style="dim")
 
     def unknown_command(self, cmd: str):
-        self.console.print(f"Unknown command: {cmd}. Type /help for available commands.", style="yellow")
+        self.console.print(
+            f"Unknown command: {cmd}. Type /help for available commands.",
+            style="yellow",
+        )
 
     def print_error(self, message: str):
         self.console.print(Text(message, style="bold red"))
@@ -72,7 +77,11 @@ class Display:
 
     def print_tool_outputs(self, actions: list[dict], outputs: list[dict]):
         for action, output in zip(actions, outputs):
-            cmd = action["command"]
+            tool_name = action.get("tool_name", "")
+            arguments = action.get("arguments", {})
+            cmd = (
+                arguments.get("command", "") if tool_name == "bash" else str(arguments)
+            )
             rc = output["returncode"]
             out = (output.get("output") or "").rstrip()
 
@@ -100,9 +109,18 @@ class Display:
         table.add_column(justify="right")
         table.add_row("Session cost", f"${report['cost']:.6f}")
         table.add_row("Calls", str(report["calls"]))
-        table.add_row("Uncached in", f"{report['uncached_tokens']:>8,} tok  ${report['uncached_cost']:.6f}")
-        table.add_row("Cached in", f"{report['cached_tokens']:>8,} tok  ${report['cached_cost']:.6f}")
-        table.add_row("Output", f"{report['completion_tokens']:>8,} tok  ${report['completion_cost']:.6f}")
+        table.add_row(
+            "Uncached in",
+            f"{report['uncached_tokens']:>8,} tok  ${report['uncached_cost']:.6f}",
+        )
+        table.add_row(
+            "Cached in",
+            f"{report['cached_tokens']:>8,} tok  ${report['cached_cost']:.6f}",
+        )
+        table.add_row(
+            "Output",
+            f"{report['completion_tokens']:>8,} tok  ${report['completion_cost']:.6f}",
+        )
         self.console.print(table)
 
     def print_tool_call_count(self, n_tool_calls: int):
@@ -121,7 +139,10 @@ class Display:
 
     def print_summarization_result(self, final_tokens: int, max_tokens: int):
         pct = final_tokens / max_tokens * 100
-        self.console.print(f"Context: {final_tokens:,} / {max_tokens:,} tok ({pct:.1f}%)", style="green")
+        self.console.print(
+            f"Context: {final_tokens:,} / {max_tokens:,} tok ({pct:.1f}%)",
+            style="green",
+        )
 
     def print_summarization_skip(self):
         self.console.print("Nothing to summarize yet.", style="dim")
@@ -133,8 +154,13 @@ class Display:
         total_tokens = info.get("total_tokens", 0)
 
         pct = total_tokens / max_context_tokens * 100
-        self.console.print(f"Context: {total_tokens:,} / {max_context_tokens:,} tok ({pct:.1f}%)", style="green")
-        self.console.print(f"Summarizing {old_turns} turn(s) ({original_tokens:,} tok):", style="bold")
+        self.console.print(
+            f"Context: {total_tokens:,} / {max_context_tokens:,} tok ({pct:.1f}%)",
+            style="green",
+        )
+        self.console.print(
+            f"Summarizing {old_turns} turn(s) ({original_tokens:,} tok):", style="bold"
+        )
         for line in input_lines:
             self.console.print(f"  {line}", style="dim")
         self.console.print()
@@ -155,14 +181,30 @@ class Display:
             pct = t / max_ctx * 100
 
             if ev["type"] == "skip":
-                lines.append(Text(f"  [{i}] skip — {t:,} / {max_ctx:,} tok ({pct:.1f}%) — no compression"))
+                lines.append(
+                    Text(
+                        f"  [{i}] skip — {t:,} / {max_ctx:,} tok ({pct:.1f}%) — no compression"
+                    )
+                )
             elif ev["type"] == "skip_summarize":
-                lines.append(Text(f"  [{i}] skip — {t:,} / {max_ctx:,} tok ({pct:.1f}%) — nothing to summarize"))
+                lines.append(
+                    Text(
+                        f"  [{i}] skip — {t:,} / {max_ctx:,} tok ({pct:.1f}%) — nothing to summarize"
+                    )
+                )
             elif ev["type"] == "clear":
-                lines.append(Text(f"  [{i}] clear — {t:,} tok — cleared {ev['count']} tool result(s): {ev['original_lines']}→{ev['new_lines']} lines"))
+                lines.append(
+                    Text(
+                        f"  [{i}] clear — {t:,} tok — cleared {ev['count']} tool result(s): {ev['original_lines']}→{ev['new_lines']} lines"
+                    )
+                )
             elif ev["type"] == "summarize":
                 prev = ev.get("summary_preview", "")
-                lines.append(Text(f"  [{i}] summarize — {t:,} tok — {ev['old_turns']} turns ({ev['original_tokens']:,}→{ev['summary_tokens']:,} tok) \"{prev[:60]}\""))
+                lines.append(
+                    Text(
+                        f'  [{i}] summarize — {t:,} tok — {ev["old_turns"]} turns ({ev["original_tokens"]:,}→{ev["summary_tokens"]:,} tok) "{prev[:60]}"'
+                    )
+                )
             elif ev["type"] == "aggressive":
                 lines.append(Text(f"  [{i}] aggressive — {t:,} tok — {ev['reason']}"))
 
@@ -170,7 +212,9 @@ class Display:
         last = events[-1] if events else {}
         last_tok = last.get("total_tokens", context.count_tokens(messages))
         pct = last_tok / max_ctx * 100
-        lines.append(Text(f"  Mode: {'verbose ON' if context.interior_mode else 'verbose OFF'}"))
+        lines.append(
+            Text(f"  Mode: {'verbose ON' if context.interior_mode else 'verbose OFF'}")
+        )
         lines.append(Text(f"  Messages: {total_messages}  |  Events: {len(events)}"))
         lines.append(Text(f"  Last ctx: {last_tok:,} / {max_ctx:,} tok ({pct:.1f}%)"))
 
@@ -211,7 +255,17 @@ class Display:
             self.console.print("Reasoning: OFF", style="dim")
 
     def print_unknown_subcommand(self, arg: str):
-        self.console.print(Text(f"Unknown: {arg}. Use: /show-interior [on|off]", style="yellow"))
+        self.console.print(
+            Text(f"Unknown: {arg}. Use: /show-interior [on|off]", style="yellow")
+        )
+
+    def print_retry_warning(self, attempt: int, wait_time: int, error: str):
+        self.console.print(
+            Text(
+                f"  ⚠ API error (attempt {attempt}/3). Retrying in {wait_time}s: {error}",
+                style="yellow",
+            )
+        )
 
     def print_cancelled(self):
         self.console.print()

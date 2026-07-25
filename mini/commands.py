@@ -100,19 +100,3 @@ def fuzzy_match(query: str, target: str) -> int:
             qi += 1
             score += 10
     return score if qi == len(query) else 0
-
-
-# Legacy global list kept for backward compatibility during migration.
-COMMANDS: list[Command] = [
-    Command("cost", "Show token usage and cost for this session", "Info"),
-    Command("calls", "Show tool call count for this session", "Info"),
-    Command("show-interior", "Toggle verbose interior mode", "Debug"),
-    Command("show-reasoning", "Show model reasoning", "Debug"),
-    Command("hide-reasoning", "Hide model reasoning", "Debug"),
-    Command("help", "Show all available commands", "Help"),
-    Command("summarization", "Force context summarization", "Session"),
-    Command("clear", "Clear conversation memory", "Session"),
-    Command("exit", "Quit the application", "Session"),
-]
-
-COMMAND_NAMES = frozenset(f"/{c.name}" for c in COMMANDS)

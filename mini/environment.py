@@ -10,8 +10,12 @@ class LocalEnvironment:
         self.timeout = timeout
 
     def execute(self, action: dict, **kwargs) -> dict[str, Any]:
-        command = action.get("command", "")
-        return self._run(command)
+        tool_name = action.get("tool_name", "")
+        arguments = action.get("arguments", {})
+        if tool_name == "bash":
+            command = arguments.get("command", "")
+            return self._run(command)
+        return {"output": f"Unknown tool: {tool_name}", "returncode": -1}
 
     def _run(self, command: str) -> dict[str, Any]:
         try:
@@ -29,6 +33,10 @@ class LocalEnvironment:
             )
             return {"output": result.stdout, "returncode": result.returncode}
         except subprocess.TimeoutExpired as e:
-            return {"output": e.output or "", "returncode": -1, "error": f"Command timed out after {self.timeout}s"}
+            return {
+                "output": e.output or "",
+                "returncode": -1,
+                "error": f"Command timed out after {self.timeout}s",
+            }
         except Exception as e:
             return {"output": str(e), "returncode": -1, "error": str(e)}

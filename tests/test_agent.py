@@ -5,6 +5,19 @@ import pytest
 from rich.console import Console
 
 from mini.core import Mini
+from mini.display import Display
+
+
+def _fake_stream_response(stream, on_usage=None, force_hide_reasoning=False):
+    message, actions, usage = None, [], None
+    for event in stream:
+        if event["type"] == "done":
+            message = event["message"]
+            actions = event["actions"]
+            usage = event.get("usage")
+            if on_usage and usage:
+                on_usage(usage)
+    return message, actions, usage
 
 
 class TestMini:
@@ -12,21 +25,31 @@ class TestMini:
         model = MagicMock()
         env = MagicMock()
         env.execute.return_value = {"output": "ok", "returncode": 0}
+        display = Display(console=Console(file=StringIO()))
+        display.stream_response = _fake_stream_response
         mini = Mini(
             model,
             env,
+            display,
             max_context_tokens=max_context_tokens,
             keep_turns=keep_turns,
         )
-        mini.display.console = Console(file=StringIO())
         return mini, model, env
 
     def test_run_turn_without_actions(self):
         mini, model, env = self._make_mini()
-        mini.messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]
+        mini.messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hi"},
+        ]
         model.stream.return_value = [
             {"type": "content", "delta": "Hello!"},
-            {"type": "done", "message": {"role": "assistant", "content": "Hello!"}, "actions": [], "usage": None},
+            {
+                "type": "done",
+                "message": {"role": "assistant", "content": "Hello!"},
+                "actions": [],
+                "usage": None,
+            },
         ]
 
         mini._run_turn()
@@ -38,23 +61,44 @@ class TestMini:
 
     def test_run_turn_with_tool_call(self):
         mini, model, env = self._make_mini()
-        mini.messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "run ls"}]
+        mini.messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "run ls"},
+        ]
         tool_call = {
             "id": "call_1",
             "type": "function",
             "function": {"name": "bash", "arguments": '{"command": "ls"}'},
         }
         message = {"role": "assistant", "content": "", "tool_calls": [tool_call]}
-        model.format_observation_messages.return_value = [{"role": "tool", "content": "ok", "tool_call_id": "call_1"}]
+        model.format_observation_messages.return_value = [
+            {"role": "tool", "content": "ok", "tool_call_id": "call_1"}
+        ]
 
         # First stream returns tool call; second returns final text answer.
         model.stream.side_effect = [
             [
-                {"type": "done", "message": message, "actions": [{"command": "ls", "tool_call_id": "call_1"}], "usage": None},
+                {
+                    "type": "done",
+                    "message": message,
+                    "actions": [
+                        {
+                            "tool_name": "bash",
+                            "arguments": {"command": "ls"},
+                            "tool_call_id": "call_1",
+                        }
+                    ],
+                    "usage": None,
+                },
             ],
             [
                 {"type": "content", "delta": "Done"},
-                {"type": "done", "message": {"role": "assistant", "content": "Done"}, "actions": [], "usage": None},
+                {
+                    "type": "done",
+                    "message": {"role": "assistant", "content": "Done"},
+                    "actions": [],
+                    "usage": None,
+                },
             ],
         ]
 
@@ -67,7 +111,10 @@ class TestMini:
 
     def test_run_turn_tracks_cost(self):
         mini, model, env = self._make_mini()
-        mini.messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]
+        mini.messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hi"},
+        ]
         model.stream.return_value = [
             {"type": "content", "delta": "Hi"},
             {
@@ -142,10 +189,3 @@ class TestMini:
             mini.start()
         assert len(mini.messages) == 1
         assert mini.messages[0]["role"] == "system"
-
-    def test_command_registry_matches_legacy_commands(self):
-        from mini.commands import COMMANDS
-        mini, model, env = self._make_mini()
-        registered_names = {c.name for c in mini.commands.commands}
-        legacy_names = {c.name for c in COMMANDS}
-        assert registered_names == legacy_names
